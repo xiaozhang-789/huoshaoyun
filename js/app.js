@@ -558,6 +558,13 @@ Object.keys(PROVINCE_CITIES).forEach(p => {
   PROVINCE_CITIES[p].forEach(c => { CITY_TO_PROVINCE[c.name] = p; });
 });
 
+// 省会/首府城市：各省级行政区点位列表的第一项
+const PROVINCE_CAPITALS = new Set(
+  Object.keys(PROVINCE_CITIES)
+    .map(p => PROVINCE_CITIES[p][0] && PROVINCE_CITIES[p][0].name)
+    .filter(Boolean)
+);
+
 // 把「河南省/广西壮族自治区/北京市…」归一化为数据集里的省份键
 function provinceKeyOf(name) {
   if (!name) return null;
@@ -610,7 +617,17 @@ async function loadProvincePoints() {
   const cities = PROVINCE_CITIES[key] || [];
   mapChart.setOption({ series: [{}, {}, {}, {}, { data: data.map(d => {
     const c = cities.find(x => x.name === d.name);
-    return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+    return {
+      name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
+      label: {
+        backgroundColor: scoreColorA(d.score, 0.92),
+        borderColor: scoreColorA(d.score, 0.7),
+        borderWidth: 1,
+        padding: [2, 5],
+        borderRadius: 5,
+        color: labelTextColor(d.score)
+      }
+    };
   })}] });
 }
 
@@ -646,7 +663,17 @@ async function loadNearbyPoints(lat, lon) {
     const scores = await fetchCityScores(near);
     data = scores.filter(d => d.score != null).map(d => {
       const c = all.find(x => x.name === d.name);
-      return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+      return {
+        name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
+        label: {
+          backgroundColor: scoreColorA(d.score, 0.92),
+          borderColor: scoreColorA(d.score, 0.7),
+          borderWidth: 1,
+          padding: [1, 5],
+          borderRadius: 4,
+          color: labelTextColor(d.score)
+        }
+      };
     });
     nearbyCache.set(key, data);
   }
@@ -768,9 +795,9 @@ function showFocusMap() {
   $('mapToggle').textContent = '查看全国';
 }
 
-// 指数 → 颜色：与热力区域同一套黄→橙→红渐变，数值越高越红
-function scoreColor(score) {
-  if (score == null) return 'rgba(160,165,185,0.55)';
+// 指数 → 颜色：与热力区域同一套黄→橙→红渐变，数值越高越红（可指定透明度）
+function scoreColorA(score, a) {
+  if (score == null) return `rgba(160,165,185,${a})`;
   const t = Math.max(0, Math.min(1, score / 100));
   const stops = [[255, 241, 118], [255, 167, 38], [255, 82, 82]];
   const seg = Math.min(2, Math.floor(t * 2));
@@ -779,7 +806,17 @@ function scoreColor(score) {
   const r = Math.round(c1[0] + (c2[0] - c1[0]) * f);
   const g = Math.round(c1[1] + (c2[1] - c1[1]) * f);
   const b = Math.round(c1[2] + (c2[2] - c1[2]) * f);
-  return `rgb(${r},${g},${b})`;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function scoreColor(score) {
+  return scoreColorA(score, 1);
+}
+
+// 标签文字颜色：底色偏红/橙时用白字，底色偏黄时用深棕字
+function labelTextColor(score) {
+  if (score == null) return '#5a5f75';
+  return score >= 70 ? '#ffffff' : '#5c3a10';
 }
 
 async function initChinaMap() {
@@ -864,17 +901,33 @@ async function initChinaMap() {
           zlevel: 2,
           data: data.map(d => {
             const c = MAP_CITIES.find(x => x.name === d.name);
-            return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+            return {
+              name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
+              label: {
+                backgroundColor: d.score == null ? 'rgba(255,255,255,0.88)' : scoreColorA(d.score, 0.92),
+                borderColor: d.score == null ? 'rgba(130,135,155,0.5)' : scoreColorA(d.score, 0.7),
+                borderWidth: 1,
+                padding: [2, 6],
+                borderRadius: 5,
+                color: labelTextColor(d.score)
+              }
+            };
           }),
           symbolSize: val => (val[2] == null ? 0 : 8 + (val[2] / 100) * 10),
           itemStyle: { color: p => scoreColor(p.data.score), borderColor: '#ffffff', borderWidth: 1.5 },
           label: {
             show: true,
             position: 'right',
-            formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name + ' ' + p.data.score : '',
-            color: '#6b4a1d',
+            formatter: p => {
+              const s = p.data.score;
+              if (s == null) return '';
+              // 省会/首府城市始终显示数值，其余城市指数 ≥ 60 才显示
+              if (s >= 60 || PROVINCE_CAPITALS.has(p.name)) return p.name + ' ' + s;
+              return '';
+            },
+            color: '#5c3a10',
             fontSize: 11,
-            fontWeight: 600
+            fontWeight: 700
           },
           emphasis: {
             scale: 1.6,
@@ -882,10 +935,12 @@ async function initChinaMap() {
               show: true,
               position: 'right',
               formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
-              color: '#6b4a1d',
+              color: p => labelTextColor(p.data.score),
               fontSize: 13,
               fontWeight: 'bold',
-              backgroundColor: 'rgba(255,255,255,0.92)',
+              backgroundColor: p => scoreColorA(p.data.score, 0.96),
+              borderColor: p => scoreColorA(p.data.score, 0.8),
+              borderWidth: 1,
               padding: [4, 8],
               borderRadius: 6
             }
@@ -960,10 +1015,12 @@ async function initChinaMap() {
               show: true,
               position: 'right',
               formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
-              color: '#6b4a1d',
+              color: p => labelTextColor(p.data.score),
               fontSize: 12,
               fontWeight: 'bold',
-              backgroundColor: 'rgba(255,255,255,0.92)',
+              backgroundColor: p => scoreColorA(p.data.score, 0.96),
+              borderColor: p => scoreColorA(p.data.score, 0.8),
+              borderWidth: 1,
               padding: [3, 6],
               borderRadius: 5
             }
@@ -1002,10 +1059,12 @@ async function initChinaMap() {
             position: 'right',
             distance: 4,
             formatter: p => p.name + ' ' + p.data.score,
-            color: '#6b4a1d',
+            color: p => labelTextColor(p.data.score),
             fontSize: 10,
             fontWeight: 600,
-            backgroundColor: 'rgba(255,255,255,0.88)',
+            backgroundColor: p => scoreColorA(p.data.score, 0.92),
+            borderColor: p => scoreColorA(p.data.score, 0.7),
+            borderWidth: 1,
             padding: [1, 5],
             borderRadius: 4
           },
