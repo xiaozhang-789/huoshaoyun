@@ -543,28 +543,59 @@ async function photonSearch(name) {
   }
 }
 
+// 从「郑州金水区」「河南滑县」这类带省市前缀的查询中生成候选搜索词：
+// 完整查询 + 末尾 2~3 字的区县形子串（金水区、滑县），全部搜索后按相关度排序
+function searchQueries(q) {
+  const cands = [q];
+  for (const n of [3, 2]) {
+    if (q.length > n) {
+      const tail = q.slice(-n);
+      if (tail.length >= 2 && /(?:区|县|旗|盟)$/.test(tail)) cands.push(tail);
+    }
+  }
+  return [...new Set(cands)];
+}
+
 // 结果排序：中文名优先于拼音、名称与查询词越吻合越靠前、查询带区/县后缀时优先匹配区县
-function rankResult(r, q) {
+function rankResult(r, q, cores) {
   let s = 0;
   if (/[\u4e00-\u9fff]/.test(r.name)) s += 3;
   if (r.name === q) s += 4;
   if (r.name.startsWith(q)) s += 2;
+  // 与候选区县名吻合（如「金水区」「滑县」）
+  let core = null;
+  if (cores) for (const c of cores) {
+    if (r.name === c || r.name.endsWith(c)) { s += 4; core = c; break; }
+  }
   if (/[区县市镇]$/.test(q) && /[区县市镇]$/.test(r.name)) s += 2;
   if (r.admin1) s += 1;
+  // 查询带省市前缀（如「郑州金水区」的「郑州」）时，结果所属区域包含该前缀优先
+  if (core) {
+    const head = q.slice(0, -core.length).trim();
+    if (head) {
+      const scope = [r.admin1, r.sub].filter(Boolean).join(' ');
+      if (scope.includes(head)) s += 5;
+    }
+  }
   return s;
 }
 
 // 合并两个数据源：Open-Meteo（城市）+ Photon（区县），按 名称+坐标 去重后按相关度排序
 async function searchCity(name) {
   const q = String(name).trim();
-  const [geo, photon] = await Promise.all([openMeteoSearch(q), photonSearch(q)]);
+  const cands = searchQueries(q);
+  const cores = cands.slice(1);  // 末尾区县形子串（用于排序加权）
+  const [geo, photon] = await Promise.all([
+    Promise.all(cands.map(openMeteoSearch)).then(xs => xs.flat()),
+    Promise.all(cands.map(photonSearch)).then(xs => xs.flat())
+  ]);
   const seen = new Set();
   const out = [];
   for (const r of [...geo, ...photon]) {
     const key = r.name.replace(/[市区县]$/, '') + '|' + r.lat.toFixed(2) + '|' + r.lon.toFixed(2);
     if (seen.has(key)) continue;
     seen.add(key);
-    r.rank = rankResult(r, q);
+    r.rank = rankResult(r, q, cores);
     out.push(r);
   }
   return out.sort((a, b) => b.rank - a.rank);
