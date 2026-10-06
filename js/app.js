@@ -77,6 +77,7 @@ function aqiLevelText(v) {
 const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast';
 const AQI_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const GEO_URL = 'https://geocoding-api.open-meteo.com/v1/search';
+const PHOTON_URL = 'https://photon.komoot.io/api/';
 
 async function fetchJson(url) {
   const res = await fetch(url);
@@ -212,7 +213,8 @@ function renderTabs() {
   const wrap = $('dayTabs');
   wrap.innerHTML = state.days.map((d, i) => {
     const label = dateLabel(d.date);
-    const dot = scoreDotColor(d.score);
+    const ev = d[state.mode];
+    const dot = scoreDotColor(ev ? ev.score : null);
     return `<button class="day-tab${i === state.selected ? ' active' : ''}" data-i="${i}" role="tab">` +
       `<span class="mini-dot" style="background:${dot}"></span>${label}` +
       `</button>`;
@@ -300,11 +302,16 @@ function renderTrend() {
   const svg = $('trendSvg');
   const days = state.days;
   if (!days || days.length < 2) { svg.innerHTML = ''; return; }
+  const mode = state.mode;
+  // 评分存放在每天对应模式（晚霞/朝霞）的事件对象里，不是 day.score
+  const scores = days.map(d => (d[mode] && d[mode].score != null ? d[mode].score : null));
+  const nums = scores.filter(s => s != null);
+  if (nums.length < 2) { svg.innerHTML = ''; return; }
   const w = 240, h = 48, pad = 7;
-  const max = Math.max(...days.map(d => d.score), 100);
+  const max = Math.max(...nums, 100);
   const pts = days.map((d, i) => [
     pad + (i / (days.length - 1)) * (w - pad * 2),
-    h - pad - (d.score / max) * (h - pad * 2)
+    h - pad - ((scores[i] == null ? 0 : scores[i]) / max) * (h - pad * 2)
   ]);
   const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
   const area = line + ` L${(w - pad).toFixed(1)},${h - pad} L${pad},${h - pad} Z`;
@@ -483,13 +490,122 @@ async function ipLocate() {
   loadCity(DEFAULT_CITY.lat, DEFAULT_CITY.lon, DEFAULT_CITY.name);
 }
 
-async function searchCity(name) {
+// Open-Meteo 地理编码：支持地级市（不含大部分区县）
+async function openMeteoSearch(name) {
   try {
     const j = await fetchJson(`${GEO_URL}?name=${encodeURIComponent(name)}&count=5&language=zh&format=json`);
-    return (j && j.results) || [];
+    return ((j && j.results) || []).map(r => ({
+      name: r.name,
+      lat: r.latitude,
+      lon: r.longitude,
+      admin1: r.admin1 || '',
+      country: r.country || '中国',
+      sub: [r.admin1, r.country].filter(Boolean).join(' · '),
+      source: 'openmeteo'
+    }));
   } catch (e) {
     return [];
   }
+}
+
+// Photon 地理编码：支持区县/镇街（如「金水区」「海淀区」）
+// lang=default 强制返回本地语言名称，避免浏览器 Accept-Language 头导致返回英文拼音
+async function photonSearch(name) {
+  try {
+    const url = `${PHOTON_URL}?q=${encodeURIComponent(name)}&limit=6&lang=default`;
+    const j = await fetchJson(url);
+    return (j.features || [])
+      .filter(f => {
+        const p = f.properties || {};
+        return String(p.countrycode || '').toUpperCase() === 'CN' || /中国/.test(p.country || '');
+      })
+      .filter(f => {
+        // 只保留地名类结果，过滤公园/学校等兴趣点
+        const k = (f.properties || {}).osm_key || '';
+        return ['place', 'locality', 'city', 'town', 'village', 'suburb', 'district', 'borough', 'municipality'].includes(k);
+      })
+      .map(f => {
+        const p = f.properties || {};
+        const [lon, lat] = f.geometry.coordinates;
+        const admin1 = p.state || p.city || p.country || '';
+        const sub = [p.city, p.state, p.district].filter(x => x && x !== p.name).join(' · ');
+        return {
+          name: p.name,
+          lat, lon,
+          admin1,
+          country: p.country || '中国',
+          sub: sub || (p.country || '中国'),
+          source: 'photon'
+        };
+      });
+  } catch (e) {
+    return [];
+  }
+}
+
+// 结果排序：中文名优先于拼音、名称与查询词越吻合越靠前、查询带区/县后缀时优先匹配区县
+function rankResult(r, q) {
+  let s = 0;
+  if (/[\u4e00-\u9fff]/.test(r.name)) s += 3;
+  if (r.name === q) s += 4;
+  if (r.name.startsWith(q)) s += 2;
+  if (/[区县市镇]$/.test(q) && /[区县市镇]$/.test(r.name)) s += 2;
+  if (r.admin1) s += 1;
+  return s;
+}
+
+// 合并两个数据源：Open-Meteo（城市）+ Photon（区县），按 名称+坐标 去重后按相关度排序
+async function searchCity(name) {
+  const q = String(name).trim();
+  const [geo, photon] = await Promise.all([openMeteoSearch(q), photonSearch(q)]);
+  const seen = new Set();
+  const out = [];
+  for (const r of [...geo, ...photon]) {
+    const key = r.name.replace(/[市区县]$/, '') + '|' + r.lat.toFixed(2) + '|' + r.lon.toFixed(2);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    r.rank = rankResult(r, q);
+    out.push(r);
+  }
+  return out.sort((a, b) => b.rank - a.rank);
+}
+
+/* ---------- 搜索建议下拉 ---------- */
+
+let suggestResults = [];
+let suggestActive = -1;
+let suggestTimer = null;
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderSuggestions() {
+  const box = $('suggestBox');
+  if (!suggestResults.length) { hideSuggest(); return; }
+  box.innerHTML = suggestResults.map((r, i) =>
+    `<div class="suggest-item${i === suggestActive ? ' active' : ''}" data-i="${i}" role="option">` +
+    `<span class="sg-name">${esc(r.name)}</span>` +
+    `<span class="sg-sub">${esc(r.sub)}</span>` +
+    `</div>`).join('');
+  box.classList.remove('hidden');
+}
+
+function hideSuggest() {
+  const box = $('suggestBox');
+  box.classList.add('hidden');
+  box.innerHTML = '';
+  suggestResults = [];
+  suggestActive = -1;
+}
+
+function chooseSuggest(i) {
+  const r = suggestResults[i];
+  if (!r) return;
+  hideSuggest();
+  $('cityInput').value = '';
+  mapFocus = true;  // 搜索区县后聚焦到该地附近 200km
+  loadCity(r.lat, r.lon, r.name, provinceKeyOf(r.admin1) || undefined);
 }
 
 /* ---------- 全国指数地图 ---------- */
@@ -591,6 +707,10 @@ function nearestProvince(lat, lon) {
 
 const provinceCache = new Map();
 
+// 地图各图层数据缓存：全国主城市点位、当前省份其余城市点位（供全国视野恢复显示）
+let mainCityPointsData = [];
+let provincePointsData = [];
+
 async function fetchCityScores(cities) {
   const out = [];
   const CONC = 8;
@@ -615,7 +735,7 @@ async function loadProvincePoints() {
   }
   if (!mapChart || state.province !== key) return;
   const cities = PROVINCE_CITIES[key] || [];
-  mapChart.setOption({ series: [{}, {}, {}, {}, { data: data.map(d => {
+  provincePointsData = data.map(d => {
     const c = cities.find(x => x.name === d.name);
     return {
       name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
@@ -628,7 +748,9 @@ async function loadProvincePoints() {
         color: labelTextColor(d.score)
       }
     };
-  })}] });
+  });
+  // 聚焦模式下只显示搜索地和附近 200km 城市指数，省份其余城市点位隐藏，全国视野时恢复
+  mapChart.setOption({ series: [{}, {}, {}, {}, { data: mapFocus ? [] : provincePointsData }] });
 }
 
 // 球面距离（km）
@@ -679,7 +801,7 @@ async function loadNearbyPoints(lat, lon) {
   }
   nearbyPointsData = data;
   if (mapChart && mapFocus) {
-    mapChart.setOption({ series: [{}, {}, {}, {}, {}, {}, { data: data }] });
+    mapChart.setOption({ series: [{}, {}, {}, {}, {}, { data: data }] });
   }
 }
 
@@ -735,7 +857,10 @@ const MAP_CENTER = [104.3, 35.85];
 function updateMapCurrentPoint(lat, lon) {
   if (!mapChart) return;
   mapChart.setOption({ series: [{}, {}, { data: [[lon, lat, 0]] }] });
-  if (mapFocus) setFocusGeo(lat, lon);
+  if (mapFocus) {
+    setFocusGeo(lat, lon);
+    $('mapToggle').textContent = '查看全国';
+  }
 }
 
 // 估算 200km 半径在当前地图缩放下对应的像素
@@ -759,11 +884,10 @@ function setFocusGeo(lat, lon) {
     geo: { center: [lon, lat], zoom: FOCUS_ZOOM },
     series: [
       { pointSize: 26, blurSize: 34 },
-      { label: { show: false } },  // 聚焦时隐藏主城市标签，由附近点位统一显示数值
+      { label: { show: false }, data: [] },  // 聚焦时只显示搜索地和附近 200km 城市，隐藏全国城市散点
       {}, {},
-      { label: { show: false } },  // 省份点位标签同样隐藏
-      {},
-      { data: nearbyPointsData }   // 恢复附近 200km 城市点位
+      { label: { show: false }, data: [] },  // 省份其余城市点位同样隐藏
+      { data: nearbyPointsData }             // 附近 200km 城市点位（含指数）
     ]
   });
   updateRangeCircle(lon, lat);
@@ -777,10 +901,9 @@ function showFullMap() {
     geo: { center: MAP_CENTER, zoom: FULL_ZOOM },
     series: [
       { pointSize: 18, blurSize: 26 },
-      { label: { show: true } },
+      { label: { show: true }, data: mainCityPointsData },
       {}, {},
-      { label: { show: true } },
-      {},
+      { label: { show: true }, data: provincePointsData },
       { data: [] }   // 全国视野下清空附近 200km 点位
     ]
   });
@@ -847,6 +970,21 @@ async function initChinaMap() {
       const c = MAP_CITIES.find(x => x.name === d.name);
       return [c.lng, c.lat, d.score];
     });
+    // 全国主城市点位（全国视野下显示，聚焦模式隐藏）
+    mainCityPointsData = data.map(d => {
+      const c = MAP_CITIES.find(x => x.name === d.name);
+      return {
+        name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
+        label: {
+          backgroundColor: d.score == null ? 'rgba(255,255,255,0.88)' : scoreColorA(d.score, 0.92),
+          borderColor: d.score == null ? 'rgba(130,135,155,0.5)' : scoreColorA(d.score, 0.7),
+          borderWidth: 1,
+          padding: [2, 6],
+          borderRadius: 5,
+          color: labelTextColor(d.score)
+        }
+      };
+    });
     chart.setOption({
       backgroundColor: '#e9edf5',
       tooltip: {
@@ -899,20 +1037,7 @@ async function initChinaMap() {
           type: 'scatter',
           coordinateSystem: 'geo',
           zlevel: 2,
-          data: data.map(d => {
-            const c = MAP_CITIES.find(x => x.name === d.name);
-            return {
-              name: d.name, score: d.score, value: [c.lng, c.lat, d.score],
-              label: {
-                backgroundColor: d.score == null ? 'rgba(255,255,255,0.88)' : scoreColorA(d.score, 0.92),
-                borderColor: d.score == null ? 'rgba(130,135,155,0.5)' : scoreColorA(d.score, 0.7),
-                borderWidth: 1,
-                padding: [2, 6],
-                borderRadius: 5,
-                color: labelTextColor(d.score)
-              }
-            };
-          }),
+          data: mainCityPointsData,
           symbolSize: val => (val[2] == null ? 0 : 8 + (val[2] / 100) * 10),
           itemStyle: { color: p => scoreColor(p.data.score), borderColor: '#ffffff', borderWidth: 1.5 },
           label: {
@@ -1026,26 +1151,6 @@ async function initChinaMap() {
             }
           },
           data: []
-        },
-        {
-          // 城市火烧云颜色覆盖圈：清晰彩环（外圈），与内圈彩点组成双层标记，仿天气地图
-          type: 'scatter',
-          coordinateSystem: 'geo',
-          zlevel: 1,
-          symbol: 'circle',
-          silent: true,
-          tooltip: { show: false },
-          data: data.filter(d => d.score != null).map(d => {
-            const c = MAP_CITIES.find(x => x.name === d.name);
-            return { value: [c.lng, c.lat, d.score] };
-          }),
-          symbolSize: val => 22 + (val[2] / 100) * 36,
-          itemStyle: {
-            color: 'rgba(255,255,255,0)',
-            borderColor: p => scoreColor(p.data.score),
-            borderWidth: 3,
-            borderOpacity: 0.95
-          }
         },
         {
           // 当前城市附近 200km 内的城市：聚焦模式下统一显示晚霞数值（含跨省）
@@ -1237,20 +1342,59 @@ function init() {
   $('searchBtn').addEventListener('click', async () => {
     const name = $('cityInput').value.trim();
     if (!name) return;
+    hideSuggest();
     const results = await searchCity(name);
     if (!results.length) {
       $('cityName').textContent = state.city;
-      $('errorMsg').textContent = `未找到城市「${name}」，换个关键词试试。`;
+      $('errorMsg').textContent = `未找到城市或区县「${name}」，换个关键词试试。`;
       $('errorBox').classList.remove('hidden');
       return;
     }
     const hit = results[0];
-    const display = [hit.name, hit.admin1 && hit.admin1 !== hit.name ? hit.admin1 : '', hit.country].filter(Boolean).join(' · ');
-    loadCity(hit.latitude, hit.longitude, display || hit.name, provinceKeyOf(hit.admin1) || undefined);
+    mapFocus = true;  // 搜索后聚焦到该地附近 200km
+    loadCity(hit.lat, hit.lon, hit.name, provinceKeyOf(hit.admin1) || undefined);
+  });
+
+  // 输入时防抖搜索，展示城市/区县建议
+  $('cityInput').addEventListener('input', () => {
+    clearTimeout(suggestTimer);
+    const q = $('cityInput').value.trim();
+    if (q.length < 2) { hideSuggest(); return; }
+    suggestTimer = setTimeout(async () => {
+      suggestResults = await searchCity(q);
+      suggestActive = -1;
+      renderSuggestions();
+    }, 280);
   });
 
   $('cityInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') $('searchBtn').click();
+    if (e.key === 'Enter') {
+      // 有高亮项时选中它；否则走查询按钮（重新搜索，避免用到过期的建议列表）
+      if (suggestActive >= 0 && suggestResults.length) { chooseSuggest(suggestActive); return; }
+      $('searchBtn').click();
+      return;
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!suggestResults.length) return;
+      suggestActive = (suggestActive + 1) % suggestResults.length;
+      renderSuggestions();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!suggestResults.length) return;
+      suggestActive = (suggestActive - 1 + suggestResults.length) % suggestResults.length;
+      renderSuggestions();
+    } else if (e.key === 'Escape') {
+      hideSuggest();
+    }
+  });
+
+  $('suggestBox').addEventListener('mousedown', e => {
+    const item = e.target.closest('.suggest-item');
+    if (item) chooseSuggest(Number(item.dataset.i));
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) hideSuggest();
   });
 
   $('locateBtn').addEventListener('click', locate);

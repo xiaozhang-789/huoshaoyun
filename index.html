@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="火烧云预报 - 基于天气数据预测晚霞/朝霞出现的概率与最佳观赏时间">
-<title>火烧云预报 · 晚霞天气预测</title>
+<title>追霞·火烧云预报（朝晚霞预测）</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -29,15 +29,18 @@
       </svg>
     </span>
     <div class="logo-text">
-      <h1>火烧云预报</h1>
+      <h1>追霞·火烧云预报</h1>
       <p>晚霞 / 朝霞天气预测</p>
     </div>
   </div>
 
-  <div class="search-bar">
-    <input id="cityInput" type="text" placeholder="搜索城市，如：北京、杭州、大理…" autocomplete="off">
-    <button id="searchBtn" class="btn primary" type="button">查询</button>
-    <button id="locateBtn" class="btn ghost" type="button">定位</button>
+  <div class="search-wrap">
+    <div class="search-bar">
+      <input id="cityInput" type="text" placeholder="搜索城市/区县，如：郑州、金水区…" autocomplete="off">
+      <button id="searchBtn" class="btn primary" type="button">查询</button>
+      <button id="locateBtn" class="btn ghost" type="button">定位</button>
+    </div>
+    <div id="suggestBox" class="suggest-box hidden" role="listbox"></div>
   </div>
 </header>
 
@@ -159,14 +162,14 @@
       </div>
     </div>
     <div id="chinaMap" role="img" aria-label="全国火烧云指数地图"></div>
-    <p class="map-tip">默认聚焦当前城市附近 200km 范围，点击「查看全国」可展开全部 · 城市点颜色与火烧云区域颜色一致：黄→橙→红 = 指数由低到高，越红晚霞越艳 · 城市为双层标记（外圈彩环+内圈彩点）· 附近 200km 内城市均显示晚霞数值 · 蓝色小点为所在省份其余城市点位 · 蓝点为当前城市 · 拖拽缩放 · 点击点位切换查询</p>
+    <p class="map-tip">默认聚焦当前城市附近 200km 范围，只显示搜索地和附近 200km 内城市的晚霞指数，点击「查看全国」可展开全部 · 城市点颜色与火烧云区域颜色一致：黄→橙→红 = 指数由低到高，越红晚霞越艳 · 蓝点为当前城市 · 拖拽缩放 · 点击点位切换查询</p>
   </section>
 
   <!-- 照片投稿墙 -->
   <section class="gallery-card glass">
     <div class="gallery-head">
       <h3>火烧云照片投稿墙</h3>
-      <p class="gallery-sub">晒出你拍到的霞光 · 投稿会打上署名水印（留空即匿名）· 照片保存在本浏览器</p>
+      <p class="gallery-sub">晒出你拍到的霞光 · 投稿会打上署名水印（留空即匿名）</p>
     </div>
     <div class="gallery-form">
       <label class="upload-btn" for="galleryFile">
@@ -196,6 +199,6 @@
 </footer>
 
 <script src="js/cities-data.js?v=1"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/app.js?v=15"></script>
 </body>
 </html>
