@@ -435,6 +435,7 @@ function loadCity(lat, lon, name, province) {
   $('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   updateMapCurrentPoint(lat, lon);
   loadProvincePoints();
+  loadNearbyPoints(lat, lon);
   loadData();
 }
 
@@ -593,7 +594,7 @@ async function fetchCityScores(cities) {
   return out;
 }
 
-// 拉取当前省份各城市指数并在地图上显示（橙色小点）
+// 拉取当前省份各城市指数并在地图上显示（颜色随指数的小点）
 async function loadProvincePoints() {
   if (!mapChart || !state.province) return;
   const key = state.province;
@@ -611,6 +612,48 @@ async function loadProvincePoints() {
     const c = cities.find(x => x.name === d.name);
     return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
   })}] });
+}
+
+// 球面距离（km）
+function distKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const rad = d => (d * Math.PI) / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+const nearbyCache = new Map();
+let nearbyPointsData = [];
+
+// 拉取当前城市附近 200km 内（含跨省）各城市的晚霞指数，聚焦模式下显示数值
+async function loadNearbyPoints(lat, lon) {
+  if (!mapChart) return;
+  const key = lat.toFixed(1) + ',' + lon.toFixed(1);
+  let data = nearbyCache.get(key);
+  if (!data) {
+    const all = [];
+    const seen = new Set();
+    Object.keys(PROVINCE_CITIES).forEach(p => {
+      PROVINCE_CITIES[p].forEach(c => {
+        if (seen.has(c.name)) return;
+        seen.add(c.name);
+        all.push(c);
+      });
+    });
+    const near = all.filter(c => c.name !== state.city && distKm(lat, lon, c.lat, c.lng) <= 200);
+    const scores = await fetchCityScores(near);
+    data = scores.filter(d => d.score != null).map(d => {
+      const c = all.find(x => x.name === d.name);
+      return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+    });
+    nearbyCache.set(key, data);
+  }
+  nearbyPointsData = data;
+  if (mapChart && mapFocus) {
+    mapChart.setOption({ series: [{}, {}, {}, {}, {}, {}, { data: data }] });
+  }
 }
 
 // 获取某城市今日晚霞简化指数（不含空气质量与能见度）
@@ -687,7 +730,14 @@ function updateRangeCircle(lon, lat) {
 function setFocusGeo(lat, lon) {
   mapChart.setOption({
     geo: { center: [lon, lat], zoom: FOCUS_ZOOM },
-    series: [{ pointSize: 34, blurSize: 62 }, {}, {}, {}]
+    series: [
+      { pointSize: 26, blurSize: 34 },
+      { label: { show: false } },  // 聚焦时隐藏主城市标签，由附近点位统一显示数值
+      {}, {},
+      { label: { show: false } },  // 省份点位标签同样隐藏
+      {},
+      { data: nearbyPointsData }   // 恢复附近 200km 城市点位
+    ]
   });
   updateRangeCircle(lon, lat);
 }
@@ -698,7 +748,14 @@ function showFullMap() {
   mapFocus = false;
   mapChart.setOption({
     geo: { center: MAP_CENTER, zoom: FULL_ZOOM },
-    series: [{ pointSize: 26, blurSize: 46 }, {}, {}, { data: [] }]
+    series: [
+      { pointSize: 18, blurSize: 26 },
+      { label: { show: true } },
+      {}, {},
+      { label: { show: true } },
+      {},
+      { data: [] }   // 全国视野下清空附近 200km 点位
+    ]
   });
   $('mapToggle').textContent = '附近 200km';
 }
@@ -797,8 +854,8 @@ async function initChinaMap() {
           type: 'heatmap',
           coordinateSystem: 'geo',
           zlevel: 1,
-          pointSize: 30,
-          blurSize: 56,
+          pointSize: 22,
+          blurSize: 30,
           data: heatData
         },
         {
@@ -914,7 +971,7 @@ async function initChinaMap() {
           data: []
         },
         {
-          // 城市火烧云颜色覆盖圈：颜色与热力区域一致，圈越大颜色越红 = 强度越高
+          // 城市火烧云颜色覆盖圈：清晰彩环（外圈），与内圈彩点组成双层标记，仿天气地图
           type: 'scatter',
           coordinateSystem: 'geo',
           zlevel: 1,
@@ -925,14 +982,35 @@ async function initChinaMap() {
             const c = MAP_CITIES.find(x => x.name === d.name);
             return { value: [c.lng, c.lat, d.score] };
           }),
-          symbolSize: val => 18 + (val[2] / 100) * 36,
+          symbolSize: val => 22 + (val[2] / 100) * 36,
           itemStyle: {
-            color: p => scoreColor(p.data.score),
-            opacity: 0.3,
+            color: 'rgba(255,255,255,0)',
             borderColor: p => scoreColor(p.data.score),
-            borderWidth: 2,
+            borderWidth: 3,
             borderOpacity: 0.95
           }
+        },
+        {
+          // 当前城市附近 200km 内的城市：聚焦模式下统一显示晚霞数值（含跨省）
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 2,
+          symbolSize: val => (val[2] == null ? 0 : 7 + (val[2] / 100) * 8),
+          itemStyle: { color: p => scoreColor(p.data.score), borderColor: '#ffffff', borderWidth: 1.3 },
+          label: {
+            show: true,
+            position: 'right',
+            distance: 4,
+            formatter: p => p.name + ' ' + p.data.score,
+            color: '#6b4a1d',
+            fontSize: 10,
+            fontWeight: 600,
+            backgroundColor: 'rgba(255,255,255,0.88)',
+            padding: [1, 5],
+            borderRadius: 4
+          },
+          emphasis: { disabled: true },
+          data: []
         }
       ]
     });
@@ -944,8 +1022,11 @@ async function initChinaMap() {
       const key = state.province;
       if (key && PROVINCE_CITIES[key]) {
         const pc = PROVINCE_CITIES[key].find(x => x.name === p.name);
-        if (pc) loadCity(pc.lat, pc.lng, pc.name, key);
+        if (pc) { loadCity(pc.lat, pc.lng, pc.name, key); return; }
       }
+      // 附近 200km 城市点位（含跨省）也可点击切换查询
+      const nc = nearbyPointsData.find(x => x.name === p.name);
+      if (nc) loadCity(nc.value[1], nc.value[0], nc.name);
     });
     // 拖拽/缩放时保持 200km 圆环贴合实际距离
     chart.on('georoam', () => updateRangeCircle(state.lat, state.lon));
@@ -955,6 +1036,7 @@ async function initChinaMap() {
     window.addEventListener('resize', () => chart.resize());
     showFocusMap();
     loadProvincePoints();
+    loadNearbyPoints(state.lat, state.lon);
   } catch (e) {
     console.warn('地图初始化失败：', e);
     note.textContent = '地图加载失败，请检查网络后刷新页面';
