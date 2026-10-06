@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="火烧云预报 - 基于天气数据预测晚霞/朝霞出现的概率与最佳观赏时间">
+<title>火烧云预报 · 晚霞天气预测</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 天空背景 -->
+<div class="sky-bg" aria-hidden="true">
+  <div class="stars" id="stars"></div>
+  <div class="horizon-glow"></div>
+</div>
+
+<header class="header">
+  <div class="logo">
+    <span class="logo-sun" aria-hidden="true">
+      <svg viewBox="0 0 48 48" width="40" height="40">
+        <circle cx="24" cy="24" r="9" fill="#ffd194"/>
+        <g stroke="#ffb347" stroke-width="2.6" stroke-linecap="round">
+          <line x1="24" y1="3" x2="24" y2="9"/><line x1="24" y1="39" x2="24" y2="45"/>
+          <line x1="3" y1="24" x2="9" y2="24"/><line x1="39" y1="24" x2="45" y2="24"/>
+          <line x1="9" y1="9" x2="13" y2="13"/><line x1="35" y1="35" x2="39" y2="39"/>
+          <line x1="9" y1="39" x2="13" y2="35"/><line x1="35" y1="13" x2="39" y2="9"/>
+        </g>
+      </svg>
+    </span>
+    <div class="logo-text">
+      <h1>火烧云预报</h1>
+      <p>晚霞 / 朝霞天气预测</p>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <input id="cityInput" type="text" placeholder="搜索城市，如：北京、杭州、大理…" autocomplete="off">
+    <button id="searchBtn" class="btn primary" type="button">查询</button>
+    <button id="locateBtn" class="btn ghost" type="button">定位</button>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- 位置与日期 -->
+  <section class="location-bar">
+    <div class="loc-left">
+      <h2 id="cityName">加载中…</h2>
+      <p id="updateTime">更新于 --:--</p>
+      <div class="mode-toggle" role="tablist" aria-label="预测模式">
+        <button class="mode-btn active" data-mode="sunset" type="button">晚霞 · 日落</button>
+        <button class="mode-btn" data-mode="sunrise" type="button">朝霞 · 日出</button>
+      </div>
+    </div>
+    <div class="day-tabs" id="dayTabs" role="tablist"></div>
+  </section>
+
+  <div id="errorBox" class="error-box hidden" role="alert">
+    <span id="errorMsg">数据加载失败，请检查网络后重试。</span>
+    <button id="retryBtn" class="btn small" type="button">重试</button>
+  </div>
+
+  <!-- 指数仪表 -->
+  <section class="gauge-card glass">
+    <div class="gauge-wrap">
+      <svg id="gaugeSvg" viewBox="0 0 220 130" width="220" height="130" role="img" aria-label="火烧云指数">
+        <defs>
+          <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#5b8def"/>
+            <stop offset="45%" stop-color="#e58ce3"/>
+            <stop offset="75%" stop-color="#ff9a3c"/>
+            <stop offset="100%" stop-color="#ff4e50"/>
+          </linearGradient>
+        </defs>
+        <path id="gaugeTrack" d="M 25 115 A 85 85 0 0 1 195 115" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="14" stroke-linecap="round"/>
+        <path id="gaugeArc" d="M 25 115 A 85 85 0 0 1 195 115" fill="none" stroke="url(#gaugeGrad)" stroke-width="14" stroke-linecap="round"
+              stroke-dasharray="267" stroke-dashoffset="267" style="transition: stroke-dashoffset 1s cubic-bezier(.3,.7,.3,1);"/>
+        <g id="gaugeTicks"></g>
+        <line id="needleLine" x1="110" y1="115" x2="195" y2="115" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <circle id="gaugeKnob" cx="195" cy="115" r="8" fill="#fff" stroke="#ff9a3c" stroke-width="2.5"/>
+      </svg>
+      <div class="gauge-center">
+        <div class="score-num"><span id="scoreNum">--</span><em>/100</em></div>
+        <div class="score-level" id="scoreLevel">--</div>
+      </div>
+    </div>
+    <div class="gauge-side">
+      <h3 id="gaugeTitle">今日火烧云指数</h3>
+      <p id="gaugeTip">综合云量、湿度、空气质量、能见度与天气状况得出，供参考。</p>
+      <div class="best-time" id="bestTime">
+      <span class="label">最佳观赏时段</span>
+      <strong id="bestTimeVal">--</strong>
+    </div>
+    <div class="score-trend">
+      <span class="trend-title">未来几天评分走势</span>
+      <svg id="trendSvg" viewBox="0 0 240 48" width="240" height="48" preserveAspectRatio="none"></svg>
+    </div>
+    </div>
+  </section>
+
+  <!-- 关键指标 -->
+  <section class="metrics" aria-label="关键气象指标">
+    <div class="metric glass">
+      <div class="m-label" id="metric-sun-label">日落时间</div>
+      <div class="m-value" id="metric-sunset">--</div>
+      <div class="m-sub" id="metric-sunset-sub">--</div>
+    </div>
+    <div class="metric glass">
+      <div class="m-label" id="metric-cloud-label">日落时云量</div>
+      <div class="m-value" id="metric-cloud">--</div>
+      <div class="m-sub" id="metric-cloud-sub">云量适中易出霞</div>
+    </div>
+    <div class="metric glass">
+      <div class="m-label">湿度</div>
+      <div class="m-value" id="metric-hum">--</div>
+      <div class="m-sub" id="metric-hum-sub">--</div>
+    </div>
+    <div class="metric glass">
+      <div class="m-label">空气质量</div>
+      <div class="m-value" id="metric-aqi">--</div>
+      <div class="m-sub" id="metric-aqi-sub">--</div>
+    </div>
+    <div class="metric glass">
+      <div class="m-label">能见度</div>
+      <div class="m-value" id="metric-vis">--</div>
+      <div class="m-sub" id="metric-vis-sub">--</div>
+    </div>
+    <div class="metric glass">
+      <div class="m-label">天气</div>
+      <div class="m-value" id="metric-weather">--</div>
+      <div class="m-sub" id="metric-weather-sub">--</div>
+    </div>
+  </section>
+
+  <!-- 云量时间轴 -->
+  <section class="chart-card glass">
+    <div class="chart-head">
+      <h3 id="chartTitle">日落前后云量变化</h3>
+      <span class="hint" id="chartDay">--</span>
+    </div>
+    <div class="bar-chart" id="cloudChart"></div>
+    <p class="chart-note" id="chartNote">柱高代表云量百分比，金色为日落时刻前后，云量在 30% - 70% 之间最易出现火烧云。</p>
+  </section>
+
+  <!-- 逐日预报一览 -->
+  <section class="forecast glass">
+    <h3>未来 7 天逐日预测</h3>
+    <div class="forecast-grid" id="forecastGrid"></div>
+  </section>
+
+  <!-- 科普 -->
+  <section class="info-grid">
+    <article class="glass info-card">
+      <h3>朝霞与晚霞是怎么形成的？</h3>
+      <p>太阳接近地平线时，阳光需穿过更厚的大气层，波长较短的蓝紫光被大量散射，只剩红橙光抵达云层，将云底染成火红色。日落时的晚霞与日出时的朝霞成因相同，都需要：天空通透、湿度适中，以及适量中高云（卷云、高积云等）托住霞光。</p>
+    </article>
+    <article class="glass info-card">
+      <h3>指数是怎么算出来的？</h3>
+      <p>本网站以日出/日落时分的 5 项指标加权计算火烧云指数（0 - 100）：云量占 40%、湿度 20%、空气质量 20%、能见度 10%、天气状况 10%。云量在 30% - 70% 之间得分最高。数据来自 Open-Meteo，指数仅供参考，好天气也要看运气。</p>
+    </article>
+    <article class="glass info-card">
+      <h3>拍摄小贴士</h3>
+      <p>晚霞集中在日落后 10 - 30 分钟最绚烂，朝霞在日出前 10 - 30 分钟最浓。提前 30 - 60 分钟到达机位，朝霞向东、晚霞向西，寻找开阔视野或水面。使用小光圈（f/8 - f/11）可拍出星芒，霞光往往"一波流"，记得持续连拍。</p>
+    </article>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <p>数据来源：Open-Meteo 天气与空气质量接口 · 本工具仅供娱乐与参考</p>
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>
