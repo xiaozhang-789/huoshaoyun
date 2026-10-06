@@ -210,9 +210,8 @@ function renderGaugeTicks() {
 
 function renderTabs() {
   const wrap = $('dayTabs');
-  const todayStr = new Date().toISOString().slice(0, 10);
   wrap.innerHTML = state.days.map((d, i) => {
-    const label = dateLabel(d.date, todayStr);
+    const label = dateLabel(d.date);
     const dot = scoreDotColor(d.score);
     return `<button class="day-tab${i === state.selected ? ' active' : ''}" data-i="${i}" role="tab">` +
       `<span class="mini-dot" style="background:${dot}"></span>${label}` +
@@ -223,10 +222,12 @@ function renderTabs() {
   });
 }
 
-function dateLabel(dateStr, todayStr) {
-  if (dateStr === todayStr) return '今天';
-  const next = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  if (dateStr === next) return '明天';
+function dateLabel(dateStr) {
+  // 以 Open-Meteo 返回的城市时区日期作为"今天"基准（修复 UTC 时差导致误判为"明天"）
+  const todayStr = state.w && state.w.daily && state.w.daily.time[0];
+  if (todayStr && dateStr === todayStr) return '今天';
+  const tomorrowStr = state.w && state.w.daily && state.w.daily.time[1];
+  if (tomorrowStr && dateStr === tomorrowStr) return '明天';
   const wd = new Date(dateStr + 'T12:00').toLocaleDateString('zh-CN', { weekday: 'short' });
   return `${dateStr.slice(5).replace('-', '/')} ${wd}`;
 }
@@ -255,7 +256,7 @@ function renderDay() {
   $('gaugeTitle').textContent = '今日' + modeName + '指数（' + sunWord + '）';
   $('gaugeTip').textContent = ev.lv.tip;
   $('bestTimeVal').textContent = `${addMinutes(ev.time, -15)} ~ ${addMinutes(ev.time, 30)}`;
-  $('chartDay').textContent = dateLabel(d.date, new Date().toISOString().slice(0, 10)) + ' · ' + sunWord + ' ' + ev.time;
+  $('chartDay').textContent = dateLabel(d.date) + ' · ' + sunWord + ' ' + ev.time;
   $('chartTitle').textContent = sunWord + '前后云量变化';
   $('chartNote').textContent = '柱高代表云量百分比，金色为' + sunWord + '时刻前后，云量在 30% - 70% 之间最易出现' + modeName + '。';
 
@@ -403,7 +404,7 @@ function renderForecast() {
   const sunWord = mode === 'sunset' ? '日落' : '日出';
   wrap.innerHTML = state.days.map((d, i) => {
     const ev = d[mode];
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = state.w && state.w.daily && state.w.daily.time[0];
     const wd = new Date(d.date + 'T12:00').toLocaleDateString('zh-CN', { weekday: 'short' });
     return `<div class="fc-item${i === state.selected ? ' active' : ''}" data-i="${i}">` +
       `<div class="fc-date">${d.date.slice(5).replace('-', '/')} ${wd}${d.date === todayStr ? '·今天' : ''}</div>` +
