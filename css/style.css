@@ -465,6 +465,22 @@ body {
 .map-head h3 { font-size: 1.05rem; }
 .map-head .hint { color: var(--text-faint); font-size: 0.82rem; }
 
+.map-head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.map-toggle {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 160, 80, 0.45);
+  background: rgba(255, 150, 70, 0.14);
+  color: #ffd9a8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .2s, transform .15s;
+  white-space: nowrap;
+}
+.map-toggle:hover { background: rgba(255, 150, 70, 0.28); transform: translateY(-1px); }
+
 #chinaMap { width: 100%; height: 520px; }
 
 .map-tip { margin-top: 14px; color: var(--text-faint); font-size: 0.78rem; line-height: 1.6; }

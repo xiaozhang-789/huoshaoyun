@@ -153,10 +153,13 @@
   <section class="map-card glass">
     <div class="map-head">
       <h3>全国火烧云指数地图</h3>
-      <span class="hint" id="mapNote">地图加载中…</span>
+      <div class="map-head-right">
+        <span class="hint" id="mapNote">地图加载中…</span>
+        <button class="map-toggle" id="mapToggle" type="button">查看全国</button>
+      </div>
     </div>
     <div id="chinaMap" role="img" aria-label="全国火烧云指数地图"></div>
-    <p class="map-tip">区域颜色越红 = 晚霞概率越高（简化指数，未计空气质量）· 拖拽缩放 · 点击城市红点切换查询 · 蓝点为当前城市</p>
+    <p class="map-tip">默认聚焦当前城市附近 200km 范围，点击「查看全国」可展开全部 · 橙色小点为当前城市所在省份的各城市点位及指数 · 区域颜色越红 = 晚霞概率越高（简化指数，未计空气质量）· 拖拽缩放 · 点击城市点位切换查询 · 蓝点为当前城市</p>
   </section>
 
   <!-- 照片投稿墙 -->
@@ -192,6 +195,7 @@
   <p>数据来源：Open-Meteo 天气与空气质量接口 · 本工具仅供娱乐与参考</p>
 </footer>
 
-<script src="js/app.js?v=3"></script>
+<script src="js/cities-data.js?v=1"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

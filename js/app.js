@@ -172,6 +172,7 @@ const state = {
   city: DEFAULT_CITY.name,
   lat: DEFAULT_CITY.lat,
   lon: DEFAULT_CITY.lon,
+  province: '河南',
   w: null, a: null,
   days: [],
   selected: 0,
@@ -424,13 +425,15 @@ function selectDay(i) {
 
 /* ---------- 定位与搜索 ---------- */
 
-function loadCity(lat, lon, name) {
+function loadCity(lat, lon, name, province) {
   state.lat = lat;
   state.lon = lon;
   state.city = name;
+  state.province = province || CITY_TO_PROVINCE[name] || nearestProvince(lat, lon) || state.province;
   $('cityName').textContent = name;
   $('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   updateMapCurrentPoint(lat, lon);
+  loadProvincePoints();
   loadData();
 }
 
@@ -545,6 +548,70 @@ function loadScript(src) {
   });
 }
 
+/* ---------- 省份城市点位（cities-data.js） ---------- */
+
+const PROVINCE_CITIES = window.PROVINCE_CITIES || {};
+const CITY_TO_PROVINCE = {};
+Object.keys(PROVINCE_CITIES).forEach(p => {
+  PROVINCE_CITIES[p].forEach(c => { CITY_TO_PROVINCE[c.name] = p; });
+});
+
+// 把「河南省/广西壮族自治区/北京市…」归一化为数据集里的省份键
+function provinceKeyOf(name) {
+  if (!name) return null;
+  const s = String(name).replace(/省|市|壮族|回族|维吾尔|特别行政区|自治州|自治区|地区|盟/g, '');
+  if (PROVINCE_CITIES[s]) return s;
+  for (const k of Object.keys(PROVINCE_CITIES)) {
+    if (String(name).includes(k)) return k;
+  }
+  return null;
+}
+
+// 根据经纬度找最近的省份（定位时没有城市名可推断省份）
+function nearestProvince(lat, lon) {
+  let best = null, bestD = Infinity;
+  const cLat = Math.cos((lat * Math.PI) / 180);
+  Object.keys(PROVINCE_CITIES).forEach(p => {
+    PROVINCE_CITIES[p].forEach(c => {
+      const d = (c.lat - lat) * (c.lat - lat) + (c.lng - lon) * (c.lng - lon) * cLat * cLat;
+      if (d < bestD) { bestD = d; best = p; }
+    });
+  });
+  return best;
+}
+
+const provinceCache = new Map();
+
+async function fetchCityScores(cities) {
+  const out = [];
+  const CONC = 8;
+  for (let i = 0; i < cities.length; i += CONC) {
+    const batch = cities.slice(i, i + CONC).map(async c => ({ name: c.name, score: await fetchCityIndex(c) }));
+    out.push(...await Promise.all(batch));
+  }
+  return out;
+}
+
+// 拉取当前省份各城市指数并在地图上显示（橙色小点）
+async function loadProvincePoints() {
+  if (!mapChart || !state.province) return;
+  const key = state.province;
+  let data = provinceCache.get(key);
+  if (!data) {
+    const cities = PROVINCE_CITIES[key] || [];
+    const mainNames = new Set(MAP_CITIES.map(c => c.name));
+    const scores = await fetchCityScores(cities);
+    data = scores.filter(d => d.score != null && !mainNames.has(d.name));
+    provinceCache.set(key, data);
+  }
+  if (!mapChart || state.province !== key) return;
+  const cities = PROVINCE_CITIES[key] || [];
+  mapChart.setOption({ series: [{}, {}, {}, {}, { data: data.map(d => {
+    const c = cities.find(x => x.name === d.name);
+    return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+  })}] });
+}
+
 // 获取某城市今日晚霞简化指数（不含空气质量与能见度）
 async function fetchCityIndex(city) {
   try {
@@ -587,11 +654,60 @@ async function loadMapData() {
 
 let mapChart = null;
 
+// 地图视野模式：true = 聚焦当前城市附近 200km；false = 全国视野
+let mapFocus = true;
+const FOCUS_ZOOM = 6;
+const FULL_ZOOM = 1.15;
+const MAP_CENTER = [104.3, 35.85];
+
 // 地图上标记当前查询城市（蓝点）
 function updateMapCurrentPoint(lat, lon) {
-  if (mapChart) {
-    mapChart.setOption({ series: [{}, {}, { data: [[lon, lat, 0]] }] });
-  }
+  if (!mapChart) return;
+  mapChart.setOption({ series: [{}, {}, { data: [[lon, lat, 0]] }] });
+  if (mapFocus) setFocusGeo(lat, lon);
+}
+
+// 估算 200km 半径在当前地图缩放下对应的像素
+function rangeRadiusPx(lon, lat) {
+  const dLon = 200 / (111.32 * Math.cos((lat * Math.PI) / 180));
+  const p1 = mapChart.convertToPixel({ geoIndex: 0 }, [lon, lat]);
+  const p2 = mapChart.convertToPixel({ geoIndex: 0 }, [lon + dLon, lat]);
+  return Math.max(10, Math.abs(p2[0] - p1[0]));
+}
+
+// 更新 200km 范围圆环（仅聚焦模式下显示）
+function updateRangeCircle(lon, lat) {
+  if (!mapChart || !mapFocus) return;
+  const r = rangeRadiusPx(lon, lat);
+  mapChart.setOption({ series: [{}, {}, {}, { data: [{ value: [lon, lat, 0], symbolSize: 2 * r }] }] });
+}
+
+// 聚焦到某城市附近 200km
+function setFocusGeo(lat, lon) {
+  mapChart.setOption({
+    geo: { center: [lon, lat], zoom: FOCUS_ZOOM },
+    series: [{ pointSize: 34, blurSize: 62 }, {}, {}, {}]
+  });
+  updateRangeCircle(lon, lat);
+}
+
+// 展开为全国视野
+function showFullMap() {
+  if (!mapChart) return;
+  mapFocus = false;
+  mapChart.setOption({
+    geo: { center: MAP_CENTER, zoom: FULL_ZOOM },
+    series: [{ pointSize: 26, blurSize: 46 }, {}, {}, { data: [] }]
+  });
+  $('mapToggle').textContent = '附近 200km';
+}
+
+// 回到当前城市附近 200km 聚焦
+function showFocusMap() {
+  if (!mapChart) return;
+  mapFocus = true;
+  setFocusGeo(state.lat, state.lon);
+  $('mapToggle').textContent = '查看全国';
 }
 
 async function initChinaMap() {
@@ -723,15 +839,86 @@ async function initChinaMap() {
             borderRadius: 4
           },
           data: [[DEFAULT_CITY.lon, DEFAULT_CITY.lat, 0]]
+        },
+        {
+          // 当前城市附近 200km 范围圆环（聚焦模式下显示）
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 2,
+          symbol: 'circle',
+          silent: true,
+          tooltip: { show: false },
+          itemStyle: {
+            color: 'rgba(79,195,247,0.08)',
+            borderColor: 'rgba(79,195,247,0.85)',
+            borderWidth: 2
+          },
+          label: {
+            show: true,
+            formatter: '200km',
+            position: 'right',
+            distance: 6,
+            color: '#9fe2ff',
+            fontSize: 11,
+            fontWeight: 600,
+            backgroundColor: 'rgba(20,16,45,0.55)',
+            padding: [2, 6],
+            borderRadius: 4
+          },
+          data: []
+        },
+        {
+          // 当前城市所在省份的各城市点位（橙色小点，带指数）
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 2,
+          symbolSize: val => (val[2] == null ? 0 : 6 + (val[2] / 100) * 6),
+          itemStyle: { color: '#ffb74d' },
+          label: {
+            show: true,
+            position: 'right',
+            formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name + ' ' + p.data.score : '',
+            color: '#ffe0b0',
+            fontSize: 10,
+            fontWeight: 600
+          },
+          emphasis: {
+            scale: 1.5,
+            label: {
+              show: true,
+              position: 'right',
+              formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 'bold',
+              backgroundColor: 'rgba(20,16,45,0.85)',
+              padding: [3, 6],
+              borderRadius: 5
+            }
+          },
+          data: []
         }
       ]
     });
 
     chart.on('click', p => {
       const c = MAP_CITIES.find(x => x.name === p.name);
-      if (c) loadCity(c.lat, c.lng, c.name);
+      if (c) { loadCity(c.lat, c.lng, c.name); return; }
+      // 省份城市点位也可点击切换查询
+      const key = state.province;
+      if (key && PROVINCE_CITIES[key]) {
+        const pc = PROVINCE_CITIES[key].find(x => x.name === p.name);
+        if (pc) loadCity(pc.lat, pc.lng, pc.name, key);
+      }
+    });
+    // 拖拽/缩放时保持 200km 圆环贴合实际距离
+    chart.on('georoam', () => updateRangeCircle(state.lat, state.lon));
+    $('mapToggle').addEventListener('click', () => {
+      if (mapFocus) showFullMap(); else showFocusMap();
     });
     window.addEventListener('resize', () => chart.resize());
+    showFocusMap();
+    loadProvincePoints();
   } catch (e) {
     console.warn('地图初始化失败：', e);
     note.textContent = '地图加载失败，请检查网络后刷新页面';
@@ -882,7 +1069,7 @@ function init() {
     }
     const hit = results[0];
     const display = [hit.name, hit.admin1 && hit.admin1 !== hit.name ? hit.admin1 : '', hit.country].filter(Boolean).join(' · ');
-    loadCity(hit.latitude, hit.longitude, display || hit.name);
+    loadCity(hit.latitude, hit.longitude, display || hit.name, provinceKeyOf(hit.admin1) || undefined);
   });
 
   $('cityInput').addEventListener('keydown', e => {
