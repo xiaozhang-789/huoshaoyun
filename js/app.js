@@ -2,7 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 
-const DEFAULT_CITY = { name: '北京', lat: 39.9075, lon: 116.39723 };
+const DEFAULT_CITY = { name: '郑州', lat: 34.7466, lon: 113.6253 };
 
 const WMO_TEXT = {
   0: '晴', 1: '基本晴', 2: '少云', 3: '阴',
@@ -486,6 +486,197 @@ async function searchCity(name) {
   }
 }
 
+/* ---------- 全国指数地图 ---------- */
+
+const MAP_CITIES = [
+  { name: '北京', lng: 116.407, lat: 39.904 },
+  { name: '上海', lng: 121.473, lat: 31.230 },
+  { name: '广州', lng: 113.264, lat: 23.129 },
+  { name: '深圳', lng: 114.057, lat: 22.543 },
+  { name: '天津', lng: 117.190, lat: 39.125 },
+  { name: '重庆', lng: 106.551, lat: 29.563 },
+  { name: '郑州', lng: 113.625, lat: 34.747 },
+  { name: '石家庄', lng: 114.514, lat: 38.042 },
+  { name: '太原', lng: 112.549, lat: 37.857 },
+  { name: '呼和浩特', lng: 111.749, lat: 40.842 },
+  { name: '沈阳', lng: 123.431, lat: 41.805 },
+  { name: '长春', lng: 125.323, lat: 43.817 },
+  { name: '哈尔滨', lng: 126.535, lat: 45.803 },
+  { name: '南京', lng: 118.796, lat: 32.060 },
+  { name: '杭州', lng: 120.155, lat: 30.274 },
+  { name: '合肥', lng: 117.227, lat: 31.820 },
+  { name: '福州', lng: 119.296, lat: 26.074 },
+  { name: '南昌', lng: 115.858, lat: 28.682 },
+  { name: '济南', lng: 117.120, lat: 36.651 },
+  { name: '武汉', lng: 114.305, lat: 30.593 },
+  { name: '长沙', lng: 112.938, lat: 28.228 },
+  { name: '南宁', lng: 108.366, lat: 22.817 },
+  { name: '海口', lng: 110.199, lat: 20.044 },
+  { name: '成都', lng: 104.066, lat: 30.572 },
+  { name: '贵阳', lng: 106.630, lat: 26.647 },
+  { name: '昆明', lng: 102.832, lat: 24.880 },
+  { name: '拉萨', lng: 91.140, lat: 29.645 },
+  { name: '西安', lng: 108.940, lat: 34.341 },
+  { name: '兰州', lng: 103.834, lat: 36.061 },
+  { name: '西宁', lng: 101.778, lat: 36.617 },
+  { name: '银川', lng: 106.232, lat: 38.487 },
+  { name: '乌鲁木齐', lng: 87.617, lat: 43.793 },
+  { name: '青岛', lng: 120.382, lat: 36.067 },
+  { name: '厦门', lng: 118.089, lat: 24.480 },
+  { name: '苏州', lng: 120.619, lat: 31.317 },
+  { name: '大理', lng: 100.267, lat: 25.606 },
+  { name: '丽江', lng: 100.233, lat: 26.872 },
+  { name: '三亚', lng: 109.512, lat: 18.252 },
+  { name: '桂林', lng: 110.290, lat: 25.274 },
+  { name: '洛阳', lng: 112.454, lat: 34.620 },
+  { name: '张家界', lng: 110.479, lat: 29.117 },
+  { name: '敦煌', lng: 94.662, lat: 40.142 },
+  { name: '秦皇岛', lng: 119.600, lat: 39.935 }
+];
+
+function loadScript(src) {
+  return new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+
+// 获取某城市今日晚霞简化指数（不含空气质量与能见度）
+async function fetchCityIndex(city) {
+  try {
+    const url = `${WEATHER_URL}?latitude=${city.lat}&longitude=${city.lng}&timezone=auto&forecast_days=1&hourly=cloud_cover,relative_humidity_2m,weather_code&daily=sunrise,sunset`;
+    const w = await fetchJson(url);
+    const date = w.daily.time[0];
+    const hour = Number(w.daily.sunset[0].slice(11, 13));
+    const candidates = [hour, hour - 1, hour + 1];
+    let idx = -1;
+    for (const h of candidates) {
+      const i = w.hourly.time.indexOf(`${date}T${pad2(h)}:00`);
+      if (i !== -1) { idx = i; break; }
+    }
+    if (idx === -1) return null;
+    return calcFireCloudScore({
+      cloud: w.hourly.cloud_cover[idx],
+      hum: w.hourly.relative_humidity_2m[idx],
+      code: w.hourly.weather_code[idx],
+      aqi: null,
+      visKm: null
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+async function loadMapData() {
+  const note = $('mapNote');
+  const data = [];
+  const CONC = 8;
+  for (let i = 0; i < MAP_CITIES.length; i += CONC) {
+    const batch = MAP_CITIES.slice(i, i + CONC).map(async c => ({ name: c.name, score: await fetchCityIndex(c) }));
+    const res = await Promise.all(batch);
+    data.push(...res);
+    note.textContent = `地图数据加载中… ${Math.min(i + CONC, MAP_CITIES.length)}/${MAP_CITIES.length}`;
+  }
+  note.textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} · 简化指数（未计空气质量）`;
+  return data;
+}
+
+function mapScoreColor(score) {
+  if (score == null) return '#55507f';
+  if (score >= 80) return '#ff5252';
+  if (score >= 60) return '#ff9a3c';
+  if (score >= 40) return '#ffd194';
+  if (score >= 20) return '#8fa6e8';
+  return '#6660a0';
+}
+
+async function initChinaMap() {
+  const note = $('mapNote');
+  try {
+    let loaded = await loadScript('https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js');
+    if (!loaded) loaded = await loadScript('https://unpkg.com/echarts@5.4.3/dist/echarts.min.js');
+    if (!loaded || !window.echarts) throw new Error('ECharts 加载失败');
+
+    let geo = null;
+    for (const src of [
+      'https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/china.json',
+      'https://unpkg.com/echarts@4.9.0/map/json/china.json'
+    ]) {
+      try {
+        geo = await fetchJson(src);
+        break;
+      } catch (e) { /* 尝试下一个数据源 */ }
+    }
+    if (!geo || !geo.features) throw new Error('中国地图数据加载失败');
+    window.echarts.registerMap('china', geo);
+
+    const data = await loadMapData();
+    const el = $('chinaMap');
+    const chart = window.echarts.init(el);
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: 'rgba(20,16,45,0.92)',
+        borderColor: 'rgba(255,255,255,0.2)',
+        textStyle: { color: '#f4f0ff', fontSize: 12 },
+        formatter: p => `${p.name}<br/>晚霞指数：<b>${p.data.score == null ? '暂无数据' : p.data.score}</b>`
+      },
+      geo: {
+        map: 'china',
+        roam: true,
+        zoom: 1.15,
+        itemStyle: { areaColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.35)', borderWidth: 1 },
+        emphasis: { itemStyle: { areaColor: 'rgba(255,170,90,0.18)' }, label: { show: false } }
+      },
+      series: [{
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        data: data.map(d => {
+          const c = MAP_CITIES.find(x => x.name === d.name);
+          return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+        }),
+        symbolSize: val => (val[2] == null ? 0 : 9 + (val[2] / 100) * 12),
+        itemStyle: { color: p => mapScoreColor(p.data.score) },
+        label: {
+          show: true,
+          position: 'right',
+          formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name : '',
+          color: '#ffd9a8',
+          fontSize: 11,
+          fontWeight: 600
+        },
+        emphasis: {
+          scale: 1.6,
+          label: {
+            show: true,
+            position: 'right',
+            formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(20,16,45,0.85)',
+            padding: [4, 8],
+            borderRadius: 6
+          }
+        }
+      }]
+    });
+
+    chart.on('click', p => {
+      const c = MAP_CITIES.find(x => x.name === p.name);
+      if (c) loadCity(c.lat, c.lng, c.name);
+    });
+    window.addEventListener('resize', () => chart.resize());
+  } catch (e) {
+    console.warn('地图初始化失败：', e);
+    note.textContent = '地图加载失败，请检查网络后刷新页面';
+  }
+}
+
 /* ---------- 事件绑定 ---------- */
 
 function init() {
@@ -523,6 +714,7 @@ function init() {
   });
 
   loadCity(DEFAULT_CITY.lat, DEFAULT_CITY.lon, DEFAULT_CITY.name);
+  initChinaMap();
 }
 
 document.addEventListener('DOMContentLoaded', init);

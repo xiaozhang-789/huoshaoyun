@@ -149,16 +149,18 @@
     <div class="forecast-grid" id="forecastGrid"></div>
   </section>
 
+  <!-- 全国指数地图 -->
+  <section class="map-card glass">
+    <div class="map-head">
+      <h3>全国火烧云指数地图</h3>
+      <span class="hint" id="mapNote">地图加载中…</span>
+    </div>
+    <div id="chinaMap" role="img" aria-label="全国火烧云指数地图"></div>
+    <p class="map-tip">指数为简化版（未计入空气质量）· 拖拽缩放地图 · 点击城市圆点即可切换查询</p>
+  </section>
+
   <!-- 科普 -->
   <section class="info-grid">
-    <article class="glass info-card">
-      <h3>朝霞与晚霞是怎么形成的？</h3>
-      <p>太阳接近地平线时，阳光需穿过更厚的大气层，波长较短的蓝紫光被大量散射，只剩红橙光抵达云层，将云底染成火红色。日落时的晚霞与日出时的朝霞成因相同，都需要：天空通透、湿度适中，以及适量中高云（卷云、高积云等）托住霞光。</p>
-    </article>
-    <article class="glass info-card">
-      <h3>指数是怎么算出来的？</h3>
-      <p>本网站以日出/日落时分的 5 项指标加权计算火烧云指数（0 - 100）：云量占 40%、湿度 20%、空气质量 20%、能见度 10%、天气状况 10%。云量在 30% - 70% 之间得分最高。数据来自 Open-Meteo，指数仅供参考，好天气也要看运气。</p>
-    </article>
     <article class="glass info-card">
       <h3>拍摄小贴士</h3>
       <p>晚霞集中在日落后 10 - 30 分钟最绚烂，朝霞在日出前 10 - 30 分钟最浓。提前 30 - 60 分钟到达机位，朝霞向东、晚霞向西，寻找开阔视野或水面。使用小光圈（f/8 - f/11）可拍出星芒，霞光往往"一波流"，记得持续连拍。</p>
@@ -171,6 +173,6 @@
   <p>数据来源：Open-Meteo 天气与空气质量接口 · 本工具仅供娱乐与参考</p>
 </footer>
 
-<script src="js/app.js"></script>
+<script src="js/app.js?v=2"></script>
 </body>
 </html>

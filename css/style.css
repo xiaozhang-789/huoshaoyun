@@ -458,6 +458,21 @@ body {
 .fc-item .fc-level { font-size: 0.76rem; color: var(--text-dim); }
 .fc-item .fc-cloud { font-size: 0.72rem; color: var(--text-faint); margin-top: 4px; }
 
+/* ========== 全国指数地图 ========== */
+.map-card { padding: 24px 28px 20px; }
+
+.map-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.map-head h3 { font-size: 1.05rem; }
+.map-head .hint { color: var(--text-faint); font-size: 0.82rem; }
+
+#chinaMap { width: 100%; height: 520px; }
+
+.map-tip { margin-top: 14px; color: var(--text-faint); font-size: 0.78rem; line-height: 1.6; }
+
+@media (max-width: 720px) {
+  #chinaMap { height: 420px; }
+}
+
 /* ========== 科普 ========== */
 .info-grid {
   display: grid;
