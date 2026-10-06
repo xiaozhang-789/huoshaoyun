@@ -430,6 +430,7 @@ function loadCity(lat, lon, name) {
   state.city = name;
   $('cityName').textContent = name;
   $('updateTime').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  updateMapCurrentPoint(lat, lon);
   loadData();
 }
 
@@ -584,13 +585,13 @@ async function loadMapData() {
   return data;
 }
 
-function mapScoreColor(score) {
-  if (score == null) return '#55507f';
-  if (score >= 80) return '#ff5252';
-  if (score >= 60) return '#ff9a3c';
-  if (score >= 40) return '#ffd194';
-  if (score >= 20) return '#8fa6e8';
-  return '#6660a0';
+let mapChart = null;
+
+// 地图上标记当前查询城市（蓝点）
+function updateMapCurrentPoint(lat, lon) {
+  if (mapChart) {
+    mapChart.setOption({ series: [{}, {}, { data: [[lon, lat, 0]] }] });
+  }
 }
 
 async function initChinaMap() {
@@ -616,6 +617,11 @@ async function initChinaMap() {
     const data = await loadMapData();
     const el = $('chinaMap');
     const chart = window.echarts.init(el);
+    mapChart = chart;
+    const heatData = data.filter(d => d.score != null).map(d => {
+      const c = MAP_CITIES.find(x => x.name === d.name);
+      return [c.lng, c.lat, d.score];
+    });
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: {
@@ -623,7 +629,30 @@ async function initChinaMap() {
         backgroundColor: 'rgba(20,16,45,0.92)',
         borderColor: 'rgba(255,255,255,0.2)',
         textStyle: { color: '#f4f0ff', fontSize: 12 },
-        formatter: p => `${p.name}<br/>晚霞指数：<b>${p.data.score == null ? '暂无数据' : p.data.score}</b>`
+        formatter: p => {
+          if (p.seriesType === 'heatmap') return `晚霞指数：<b>${p.value[2]}</b>`;
+          return `${p.name}<br/>晚霞指数：<b>${p.data.score == null ? '暂无数据' : p.data.score}</b>`;
+        }
+      },
+      visualMap: {
+        type: 'continuous',
+        min: 0,
+        max: 100,
+        calculable: true,
+        seriesIndex: 0,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 6,
+        itemWidth: 12,
+        itemHeight: 150,
+        text: ['高', '低'],
+        textGap: 8,
+        textStyle: { color: '#cfc8f0', fontSize: 11 },
+        inRange: { color: ['rgba(255,241,118,0.35)', 'rgba(255,167,38,0.5)', 'rgba(255,82,82,0.6)'] },
+        backgroundColor: 'rgba(20,16,45,0.6)',
+        borderColor: 'rgba(255,255,255,0.18)',
+        borderWidth: 1,
+        padding: 8
       },
       geo: {
         map: 'china',
@@ -632,38 +661,70 @@ async function initChinaMap() {
         itemStyle: { areaColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.35)', borderWidth: 1 },
         emphasis: { itemStyle: { areaColor: 'rgba(255,170,90,0.18)' }, label: { show: false } }
       },
-      series: [{
-        type: 'scatter',
-        coordinateSystem: 'geo',
-        data: data.map(d => {
-          const c = MAP_CITIES.find(x => x.name === d.name);
-          return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
-        }),
-        symbolSize: val => (val[2] == null ? 0 : 9 + (val[2] / 100) * 12),
-        itemStyle: { color: p => mapScoreColor(p.data.score) },
-        label: {
-          show: true,
-          position: 'right',
-          formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name : '',
-          color: '#ffd9a8',
-          fontSize: 11,
-          fontWeight: 600
+      series: [
+        {
+          type: 'heatmap',
+          coordinateSystem: 'geo',
+          zlevel: 1,
+          pointSize: 26,
+          blurSize: 46,
+          data: heatData
         },
-        emphasis: {
-          scale: 1.6,
+        {
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 2,
+          data: data.map(d => {
+            const c = MAP_CITIES.find(x => x.name === d.name);
+            return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
+          }),
+          symbolSize: val => (val[2] == null ? 0 : 7 + (val[2] / 100) * 8),
+          itemStyle: { color: '#ff5252' },
           label: {
             show: true,
             position: 'right',
-            formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
-            color: '#fff',
-            fontSize: 13,
-            fontWeight: 'bold',
-            backgroundColor: 'rgba(20,16,45,0.85)',
-            padding: [4, 8],
-            borderRadius: 6
+            formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name + ' ' + p.data.score : '',
+            color: '#ffd9a8',
+            fontSize: 11,
+            fontWeight: 600
+          },
+          emphasis: {
+            scale: 1.6,
+            label: {
+              show: true,
+              position: 'right',
+              formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 'bold',
+              backgroundColor: 'rgba(20,16,45,0.85)',
+              padding: [4, 8],
+              borderRadius: 6
+            }
           }
+        },
+        {
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 3,
+          name: '当前位置',
+          symbol: 'pin',
+          symbolSize: 22,
+          itemStyle: { color: '#4fc3f7', borderColor: '#ffffff', borderWidth: 2 },
+          label: {
+            show: true,
+            formatter: '当前位置',
+            position: 'top',
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 600,
+            backgroundColor: 'rgba(20,16,45,0.7)',
+            padding: [2, 6],
+            borderRadius: 4
+          },
+          data: [[DEFAULT_CITY.lon, DEFAULT_CITY.lat, 0]]
         }
-      }]
+      ]
     });
 
     chart.on('click', p => {
@@ -674,6 +735,132 @@ async function initChinaMap() {
   } catch (e) {
     console.warn('地图初始化失败：', e);
     note.textContent = '地图加载失败，请检查网络后刷新页面';
+  }
+}
+
+/* ---------- 照片投稿墙 ---------- */
+
+const GALLERY_KEY = 'fc_gallery_v1';
+const GALLERY_MAX = 30;
+
+function getGallery() {
+  try { return JSON.parse(localStorage.getItem(GALLERY_KEY)) || []; } catch (e) { return []; }
+}
+
+function saveGallery(list) {
+  try {
+    localStorage.setItem(GALLERY_KEY, JSON.stringify(list));
+    return true;
+  } catch (e) {
+    alert('本地存储空间不足，请先删除部分旧照片再投稿。');
+    return false;
+  }
+}
+
+// 压缩图片为 JPEG dataURL（最长边 ≤ 900px）
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 900;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+
+// 在照片上绘制署名水印（名字或匿名 + 日期）
+function applyWatermark(dataURL, name, dateStr) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0, canvas.height - 56, canvas.width, 56);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 26px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 6;
+      ctx.fillText((name || '匿名') + ' · ' + dateStr, 18, canvas.height - 28);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = dataURL;
+  });
+}
+
+function renderGallery() {
+  const list = getGallery();
+  const grid = $('galleryGrid');
+  const empty = $('galleryEmpty');
+  grid.innerHTML = '';
+  empty.classList.toggle('hidden', list.length > 0);
+  list.forEach(item => {
+    const card = document.createElement('figure');
+    card.className = 'gallery-item';
+
+    const img = document.createElement('img');
+    img.src = item.dataURL;
+    img.alt = item.name || '匿名';
+
+    const fig = document.createElement('figcaption');
+    fig.textContent = (item.name || '匿名') + ' · ' + item.date;
+
+    const dl = document.createElement('a');
+    dl.className = 'gallery-dl';
+    dl.textContent = '下载';
+    dl.href = item.dataURL;
+    dl.download = 'huoshaoyun-' + item.date.replace(/\//g, '-') + '.jpg';
+
+    const del = document.createElement('button');
+    del.className = 'gallery-del';
+    del.textContent = '删除';
+    del.onclick = () => {
+      const next = getGallery().filter(x => x.id !== item.id);
+      if (saveGallery(next)) renderGallery();
+    };
+
+    const ops = document.createElement('div');
+    ops.className = 'gallery-ops';
+    ops.append(dl, del);
+
+    card.append(img, fig, ops);
+    grid.appendChild(card);
+  });
+}
+
+async function handleGalleryFile(file) {
+  try {
+    const raw = await compressImage(file);
+    const name = ($('galleryName').value || '').trim();
+    const date = new Date().toLocaleDateString('zh-CN');
+    const watermarked = await applyWatermark(raw, name, date);
+    const list = getGallery();
+    list.unshift({ id: Date.now(), dataURL: watermarked, name, date });
+    while (list.length > GALLERY_MAX) list.pop();
+    if (saveGallery(list)) {
+      $('galleryName').value = '';
+      $('galleryFile').value = '';
+      $('gallerySubmit').disabled = true;
+      renderGallery();
+      $('galleryGrid').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (e) {
+    alert('图片处理失败，请换一张试试。');
   }
 }
 
@@ -704,6 +891,21 @@ function init() {
 
   $('locateBtn').addEventListener('click', locate);
   $('retryBtn').addEventListener('click', loadData);
+
+  // 照片投稿墙
+  renderGallery();
+  $('galleryFile').addEventListener('change', e => {
+    $('gallerySubmit').disabled = !e.target.files[0];
+  });
+  $('gallerySubmit').addEventListener('click', () => {
+    const f = $('galleryFile').files[0];
+    if (f) handleGalleryFile(f);
+  });
+  $('galleryClear').addEventListener('click', () => {
+    if (confirm('确定清空全部投稿照片吗？')) {
+      if (saveGallery([])) renderGallery();
+    }
+  });
 
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {

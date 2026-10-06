@@ -156,7 +156,26 @@
       <span class="hint" id="mapNote">地图加载中…</span>
     </div>
     <div id="chinaMap" role="img" aria-label="全国火烧云指数地图"></div>
-    <p class="map-tip">指数为简化版（未计入空气质量）· 拖拽缩放地图 · 点击城市圆点即可切换查询</p>
+    <p class="map-tip">区域颜色越红 = 晚霞概率越高（简化指数，未计空气质量）· 拖拽缩放 · 点击城市红点切换查询 · 蓝点为当前城市</p>
+  </section>
+
+  <!-- 照片投稿墙 -->
+  <section class="gallery-card glass">
+    <div class="gallery-head">
+      <h3>火烧云照片投稿墙</h3>
+      <p class="gallery-sub">晒出你拍到的霞光 · 投稿会打上署名水印（留空即匿名）· 照片保存在本浏览器</p>
+    </div>
+    <div class="gallery-form">
+      <label class="upload-btn" for="galleryFile">
+        选择照片
+        <input type="file" id="galleryFile" accept="image/*" hidden>
+      </label>
+      <input type="text" id="galleryName" class="gallery-name-input" placeholder="署名（可留空 = 匿名）" maxlength="12">
+      <button class="gallery-submit" id="gallerySubmit" disabled>投稿</button>
+      <button class="gallery-clear" id="galleryClear">清空全部</button>
+    </div>
+    <div class="gallery-grid" id="galleryGrid"></div>
+    <p class="gallery-empty" id="galleryEmpty">还没有投稿，快来晒出你的第一张霞光吧</p>
   </section>
 
   <!-- 科普 -->
@@ -173,6 +192,6 @@
   <p>数据来源：Open-Meteo 天气与空气质量接口 · 本工具仅供娱乐与参考</p>
 </footer>
 
-<script src="js/app.js?v=2"></script>
+<script src="js/app.js?v=3"></script>
 </body>
 </html>
