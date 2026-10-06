@@ -711,6 +711,20 @@ function showFocusMap() {
   $('mapToggle').textContent = '查看全国';
 }
 
+// 指数 → 颜色：与热力区域同一套黄→橙→红渐变，数值越高越红
+function scoreColor(score) {
+  if (score == null) return 'rgba(160,165,185,0.55)';
+  const t = Math.max(0, Math.min(1, score / 100));
+  const stops = [[255, 241, 118], [255, 167, 38], [255, 82, 82]];
+  const seg = Math.min(2, Math.floor(t * 2));
+  const f = t * 2 - seg;
+  const c1 = stops[seg], c2 = stops[Math.min(2, seg + 1)];
+  const r = Math.round(c1[0] + (c2[0] - c1[0]) * f);
+  const g = Math.round(c1[1] + (c2[1] - c1[1]) * f);
+  const b = Math.round(c1[2] + (c2[2] - c1[2]) * f);
+  return `rgb(${r},${g},${b})`;
+}
+
 async function initChinaMap() {
   const note = $('mapNote');
   try {
@@ -740,7 +754,7 @@ async function initChinaMap() {
       return [c.lng, c.lat, d.score];
     });
     chart.setOption({
-      backgroundColor: 'transparent',
+      backgroundColor: '#e9edf5',
       tooltip: {
         trigger: 'item',
         backgroundColor: 'rgba(20,16,45,0.92)',
@@ -764,8 +778,8 @@ async function initChinaMap() {
         itemHeight: 150,
         text: ['高', '低'],
         textGap: 8,
-        textStyle: { color: '#cfc8f0', fontSize: 11 },
-        inRange: { color: ['rgba(255,241,118,0.35)', 'rgba(255,167,38,0.5)', 'rgba(255,82,82,0.6)'] },
+        textStyle: { color: '#5a5a72', fontSize: 11 },
+        inRange: { color: ['rgba(255,232,110,0.55)', 'rgba(255,170,40,0.6)', 'rgba(255,66,66,0.65)'] },
         backgroundColor: 'rgba(20,16,45,0.6)',
         borderColor: 'rgba(255,255,255,0.18)',
         borderWidth: 1,
@@ -775,16 +789,16 @@ async function initChinaMap() {
         map: 'china',
         roam: true,
         zoom: 1.15,
-        itemStyle: { areaColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.35)', borderWidth: 1 },
-        emphasis: { itemStyle: { areaColor: 'rgba(255,170,90,0.18)' }, label: { show: false } }
+        itemStyle: { areaColor: '#dde2ee', borderColor: '#98a1ba', borderWidth: 1 },
+        emphasis: { itemStyle: { areaColor: '#f7dccb' }, label: { show: false } }
       },
       series: [
         {
           type: 'heatmap',
           coordinateSystem: 'geo',
           zlevel: 1,
-          pointSize: 26,
-          blurSize: 46,
+          pointSize: 30,
+          blurSize: 56,
           data: heatData
         },
         {
@@ -795,13 +809,13 @@ async function initChinaMap() {
             const c = MAP_CITIES.find(x => x.name === d.name);
             return { name: d.name, score: d.score, value: [c.lng, c.lat, d.score] };
           }),
-          symbolSize: val => (val[2] == null ? 0 : 7 + (val[2] / 100) * 8),
-          itemStyle: { color: '#ff5252' },
+          symbolSize: val => (val[2] == null ? 0 : 8 + (val[2] / 100) * 10),
+          itemStyle: { color: p => scoreColor(p.data.score), borderColor: '#ffffff', borderWidth: 1.5 },
           label: {
             show: true,
             position: 'right',
             formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name + ' ' + p.data.score : '',
-            color: '#ffd9a8',
+            color: '#6b4a1d',
             fontSize: 11,
             fontWeight: 600
           },
@@ -811,10 +825,10 @@ async function initChinaMap() {
               show: true,
               position: 'right',
               formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
-              color: '#fff',
+              color: '#6b4a1d',
               fontSize: 13,
               fontWeight: 'bold',
-              backgroundColor: 'rgba(20,16,45,0.85)',
+              backgroundColor: 'rgba(255,255,255,0.92)',
               padding: [4, 8],
               borderRadius: 6
             }
@@ -859,27 +873,27 @@ async function initChinaMap() {
             formatter: '200km',
             position: 'right',
             distance: 6,
-            color: '#9fe2ff',
+            color: '#0e6f9e',
             fontSize: 11,
             fontWeight: 600,
-            backgroundColor: 'rgba(20,16,45,0.55)',
+            backgroundColor: 'rgba(255,255,255,0.88)',
             padding: [2, 6],
             borderRadius: 4
           },
           data: []
         },
         {
-          // 当前城市所在省份的各城市点位（橙色小点，带指数）
+          // 当前城市所在省份的各城市点位（颜色随指数，带指数）
           type: 'scatter',
           coordinateSystem: 'geo',
           zlevel: 2,
-          symbolSize: val => (val[2] == null ? 0 : 6 + (val[2] / 100) * 6),
-          itemStyle: { color: '#ffb74d' },
+          symbolSize: val => (val[2] == null ? 0 : 6 + (val[2] / 100) * 7),
+          itemStyle: { color: p => scoreColor(p.data.score), borderColor: '#ffffff', borderWidth: 1.2 },
           label: {
             show: true,
             position: 'right',
             formatter: p => (p.data.score != null && p.data.score >= 60) ? p.name + ' ' + p.data.score : '',
-            color: '#ffe0b0',
+            color: '#7a5420',
             fontSize: 10,
             fontWeight: 600
           },
@@ -889,15 +903,36 @@ async function initChinaMap() {
               show: true,
               position: 'right',
               formatter: p => p.name + ' ' + (p.data.score == null ? '--' : p.data.score),
-              color: '#fff',
+              color: '#6b4a1d',
               fontSize: 12,
               fontWeight: 'bold',
-              backgroundColor: 'rgba(20,16,45,0.85)',
+              backgroundColor: 'rgba(255,255,255,0.92)',
               padding: [3, 6],
               borderRadius: 5
             }
           },
           data: []
+        },
+        {
+          // 城市火烧云颜色覆盖圈：颜色与热力区域一致，圈越大颜色越红 = 强度越高
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          zlevel: 1,
+          symbol: 'circle',
+          silent: true,
+          tooltip: { show: false },
+          data: data.filter(d => d.score != null).map(d => {
+            const c = MAP_CITIES.find(x => x.name === d.name);
+            return { value: [c.lng, c.lat, d.score] };
+          }),
+          symbolSize: val => 18 + (val[2] / 100) * 36,
+          itemStyle: {
+            color: p => scoreColor(p.data.score),
+            opacity: 0.3,
+            borderColor: p => scoreColor(p.data.score),
+            borderWidth: 2,
+            borderOpacity: 0.95
+          }
         }
       ]
     });
