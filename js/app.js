@@ -85,6 +85,20 @@ async function fetchJson(url) {
   return res.json();
 }
 
+// 带重试的请求：Photon 等免费接口偶发限流/抖动，失败后自动重试，避免静默返回空结果
+async function fetchJsonRetry(url, tries = 3) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fetchJson(url);
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await new Promise(r => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchData(lat, lon) {
   const params = `latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=7`;
   const [w, a] = await Promise.all([
@@ -493,7 +507,7 @@ async function ipLocate() {
 // Open-Meteo 地理编码：支持地级市（不含大部分区县）
 async function openMeteoSearch(name) {
   try {
-    const j = await fetchJson(`${GEO_URL}?name=${encodeURIComponent(name)}&count=5&language=zh&format=json`);
+    const j = await fetchJsonRetry(`${GEO_URL}?name=${encodeURIComponent(name)}&count=5&language=zh&format=json`);
     return ((j && j.results) || []).map(r => ({
       name: r.name,
       lat: r.latitude,
@@ -513,7 +527,7 @@ async function openMeteoSearch(name) {
 async function photonSearch(name) {
   try {
     const url = `${PHOTON_URL}?q=${encodeURIComponent(name)}&limit=6&lang=default`;
-    const j = await fetchJson(url);
+    const j = await fetchJsonRetry(url);
     return (j.features || [])
       .filter(f => {
         const p = f.properties || {};
@@ -544,14 +558,17 @@ async function photonSearch(name) {
 }
 
 // 从「郑州金水区」「河南滑县」这类带省市前缀的查询中生成候选搜索词：
-// 完整查询 + 末尾 2~3 字的区县形子串（金水区、滑县），全部搜索后按相关度排序
+// 完整查询 + 末尾的区县形子串。规则：
+// - 末尾 3 字以 区/县/旗/盟 结尾 → 可能是「金水区」这类区县名，加入
+// - 末尾 2 字以 县/旗/盟 结尾 → 可能是「滑县」这类两字县名，加入
+//   （此时若 3 字尾巴以它结尾，说明 3 字尾巴是冗余前缀如「南滑县」，剔除）
 function searchQueries(q) {
   const cands = [q];
-  for (const n of [3, 2]) {
-    if (q.length > n) {
-      const tail = q.slice(-n);
-      if (tail.length >= 2 && /(?:区|县|旗|盟)$/.test(tail)) cands.push(tail);
-    }
+  const t3 = q.slice(-3), t2 = q.slice(-2);
+  if (q.length > 3 && /(?:区|县|旗|盟)$/.test(t3)) cands.push(t3);
+  if (q.length > 2 && /(?:县|旗|盟)$/.test(t2)) {
+    cands.push(t2);
+    if (q.length > 3 && t3.endsWith(t2)) cands.splice(cands.indexOf(t3), 1);
   }
   return [...new Set(cands)];
 }
