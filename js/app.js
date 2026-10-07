@@ -1255,24 +1255,106 @@ async function initChinaMap() {
   }
 }
 
-/* ---------- 照片投稿墙 ---------- */
+/* ---------- 照片分享墙 ---------- */
 
+// ==== 分享墙后端配置（LeanCloud，免费）====
+// 1. 到 https://www.leancloud.cn 注册账号并创建应用（国内版）
+// 2. 进入 控制台 → 设置 → 应用凭证，复制 AppID / AppKey / 服务器地址
+// 3. 填入下面三项后保存，打开网页照片即全网共享
+// 4. （可选）控制台 → 设置 → 安全中心 → 配置安全域名，填入你的 GitHub Pages 域名
+// 未填写配置时自动回退为「仅本浏览器可见」。
+const SHARE_CONFIG = {
+  appId: '',      // 应用凭证 → AppID
+  appKey: '',     // 应用凭证 → AppKey
+  serverURL: ''   // 应用凭证 → 服务器地址（形如 https://xxxx.api.lncldglobal.com）
+};
+const SHARE_CLASS = 'SharePhoto';
 const GALLERY_KEY = 'fc_gallery_v1';
 const GALLERY_MAX = 30;
+const SHARE_OWNER_KEY = 'fc_share_owner_v1';
 
-function getGallery() {
+const isRemoteShare = () => !!(SHARE_CONFIG.appId && SHARE_CONFIG.serverURL);
+
+// 本机固定的匿名所有者标识（用于删除自己上传的照片）
+function myOwnerId() {
+  let o = localStorage.getItem(SHARE_OWNER_KEY);
+  if (!o) {
+    o = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    localStorage.setItem(SHARE_OWNER_KEY, o);
+  }
+  return o;
+}
+
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
+// 「2026-10-07」→「2026/10/7」
+function fmtDate(v) {
+  if (!v) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+  if (m) return m[1] + '/' + Number(m[2]) + '/' + Number(m[3]);
+  return String(v);
+}
+
+/* ---- LeanCloud REST 接口 ---- */
+
+function lcHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'X-LC-Id': SHARE_CONFIG.appId,
+    'X-LC-Key': SHARE_CONFIG.appKey
+  };
+}
+
+// 读取分享墙（最新在前）
+async function lcQuery() {
+  const res = await fetch(`${SHARE_CONFIG.serverURL}/1.1/classes/${SHARE_CLASS}?order=-createdAt&limit=${GALLERY_MAX}`, { headers: lcHeaders() });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const j = await res.json();
+  return (j.results || []).map(o => ({
+    id: o.objectId,
+    dataURL: o.image,
+    name: o.name || '',
+    date: o.date || o.createdAt,
+    ts: Date.parse(o.createdAt) || 0,
+    owner: o.owner || ''
+  }));
+}
+
+async function lcCreate(obj) {
+  const res = await fetch(`${SHARE_CONFIG.serverURL}/1.1/classes/${SHARE_CLASS}`, {
+    method: 'POST', headers: lcHeaders(), body: JSON.stringify(obj)
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function lcDelete(objectId) {
+  const res = await fetch(`${SHARE_CONFIG.serverURL}/1.1/classes/${SHARE_CLASS}/${objectId}`, {
+    method: 'DELETE', headers: lcHeaders()
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+}
+
+/* ---- 本地回退存储 ---- */
+
+function getLocalGallery() {
   try { return JSON.parse(localStorage.getItem(GALLERY_KEY)) || []; } catch (e) { return []; }
 }
 
-function saveGallery(list) {
+function saveLocalGallery(list) {
   try {
     localStorage.setItem(GALLERY_KEY, JSON.stringify(list));
     return true;
   } catch (e) {
-    alert('本地存储空间不足，请先删除部分旧照片再投稿。');
+    alert('本地存储空间不足，请先删除部分旧照片再分享。');
     return false;
   }
 }
+
+/* ---- 图片处理 ---- */
 
 // 压缩图片为 JPEG dataURL（最长边 ≤ 900px）
 function compressImage(file) {
@@ -1296,7 +1378,7 @@ function compressImage(file) {
   });
 }
 
-// 在照片上绘制署名水印（名字或匿名 + 日期）
+// 在照片正中间绘制署名水印（名字或匿名 + 日期）
 function applyWatermark(dataURL, name, dateStr) {
   return new Promise(resolve => {
     const img = new Image();
@@ -1306,78 +1388,137 @@ function applyWatermark(dataURL, name, dateStr) {
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.fillRect(0, canvas.height - 56, canvas.width, 56);
+      const W = canvas.width, H = canvas.height;
+      const bandH = Math.max(46, Math.round(H * 0.085));
+      const y = Math.round(H / 2 - bandH / 2);
+      // 正中间的半透明条带
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
+      ctx.fillRect(0, y, W, bandH);
+      // 条带上下的细线点缀
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillRect(0, y, W, 2);
+      ctx.fillRect(0, y + bandH - 2, W, 2);
+      // 署名文字
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 26px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 6;
-      ctx.fillText((name || '匿名') + ' · ' + dateStr, 18, canvas.height - 28);
+      ctx.shadowColor = 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur = 8;
+      ctx.font = `bold ${Math.max(20, Math.round(W * 0.05))}px "PingFang SC","Microsoft YaHei",sans-serif`;
+      ctx.fillText((name || '匿名') + ' · ' + fmtDate(dateStr), W / 2, y + bandH / 2);
       resolve(canvas.toDataURL('image/jpeg', 0.85));
     };
     img.src = dataURL;
   });
 }
 
-function renderGallery() {
-  const list = getGallery();
+/* ---- 渲染 ---- */
+
+let shareCache = [];  // 远程分享墙缓存
+
+// 加载并渲染分享墙（远程优先，失败回退本地）
+async function loadGallery() {
+  const grid = $('galleryGrid');
+  const empty = $('galleryEmpty');
+  const sub = $('gallerySub');
+  if (isRemoteShare()) {
+    sub.textContent = '晒出你拍到的霞光 · 照片全网共享，正中带署名水印，禁止下载';
+    try {
+      shareCache = await lcQuery();
+      renderGallery(shareCache);
+    } catch (e) {
+      console.error('分享墙远程加载失败，回退本地：', e);
+      sub.textContent = '晒出你拍到的霞光 · 正中带署名水印，禁止下载（远程不可用，当前仅本浏览器可见）';
+      renderGallery(getLocalGallery());
+    }
+  } else {
+    sub.textContent = '晒出你拍到的霞光 · 正中带署名水印，禁止下载（未配置后端，当前仅本浏览器可见）';
+    renderGallery(getLocalGallery());
+  }
+}
+
+function renderGallery(list) {
   const grid = $('galleryGrid');
   const empty = $('galleryEmpty');
   grid.innerHTML = '';
   empty.classList.toggle('hidden', list.length > 0);
-  list.forEach(item => {
+  // 按发布日期倒序，最新的排最前
+  const sorted = [...list].sort((a, b) => (b.ts || b.id || 0) - (a.ts || a.id || 0));
+  sorted.forEach(item => {
     const card = document.createElement('figure');
     card.className = 'gallery-item';
+    // 每张照片轻微随机倾角，营造错落悬浮感
+    card.style.setProperty('--tilt', (Math.random() * 2.4 - 1.2).toFixed(2) + 'deg');
+    card.oncontextmenu = e => e.preventDefault();
 
     const img = document.createElement('img');
     img.src = item.dataURL;
     img.alt = item.name || '匿名';
+    img.draggable = false;
 
     const fig = document.createElement('figcaption');
-    fig.textContent = (item.name || '匿名') + ' · ' + item.date;
+    fig.textContent = (item.name || '匿名') + ' · ' + fmtDate(item.date);
 
-    const dl = document.createElement('a');
-    dl.className = 'gallery-dl';
-    dl.textContent = '下载';
-    dl.href = item.dataURL;
-    dl.download = 'huoshaoyun-' + item.date.replace(/\//g, '-') + '.jpg';
-
-    const del = document.createElement('button');
-    del.className = 'gallery-del';
-    del.textContent = '删除';
-    del.onclick = () => {
-      const next = getGallery().filter(x => x.id !== item.id);
-      if (saveGallery(next)) renderGallery();
-    };
-
-    const ops = document.createElement('div');
-    ops.className = 'gallery-ops';
-    ops.append(dl, del);
-
-    card.append(img, fig, ops);
+    // 禁止下载：仅自己的照片显示删除按钮（远程），本地模式全部可删
+    const canDel = !isRemoteShare() || (item.owner && item.owner === myOwnerId());
+    if (canDel) {
+      const del = document.createElement('button');
+      del.className = 'gallery-del';
+      del.textContent = '删除';
+      del.onclick = async () => {
+        if (isRemoteShare()) {
+          try {
+            await lcDelete(item.id);
+            shareCache = shareCache.filter(x => x.id !== item.id);
+            renderGallery(shareCache);
+          } catch (e) { alert('删除失败，请稍后再试。'); }
+        } else {
+          const next = getLocalGallery().filter(x => x.id !== item.id);
+          if (saveLocalGallery(next)) renderGallery(next);
+        }
+      };
+      const ops = document.createElement('div');
+      ops.className = 'gallery-ops';
+      ops.append(del);
+      card.append(img, fig, ops);
+    } else {
+      card.append(img, fig);
+    }
     grid.appendChild(card);
   });
 }
 
 async function handleGalleryFile(file) {
+  const btn = $('gallerySubmit');
   try {
     const raw = await compressImage(file);
     const name = ($('galleryName').value || '').trim();
-    const date = new Date().toLocaleDateString('zh-CN');
+    const date = todayISO();
+    const ts = Date.now();
     const watermarked = await applyWatermark(raw, name, date);
-    const list = getGallery();
-    list.unshift({ id: Date.now(), dataURL: watermarked, name, date });
-    while (list.length > GALLERY_MAX) list.pop();
-    if (saveGallery(list)) {
-      $('galleryName').value = '';
-      $('galleryFile').value = '';
-      $('gallerySubmit').disabled = true;
-      renderGallery();
-      $('galleryGrid').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    btn.disabled = true;
+    btn.textContent = '上传中…';
+    if (isRemoteShare()) {
+      const created = await lcCreate({ image: watermarked, name, date, owner: myOwnerId() });
+      shareCache.unshift({ id: created.objectId, dataURL: watermarked, name, date, ts, owner: myOwnerId() });
+      shareCache = shareCache.slice(0, GALLERY_MAX);
+      renderGallery(shareCache);
+    } else {
+      const list = getLocalGallery();
+      list.unshift({ id: ts, ts, dataURL: watermarked, name, date, owner: myOwnerId() });
+      while (list.length > GALLERY_MAX) list.pop();
+      if (!saveLocalGallery(list)) return;
+      renderGallery(list);
     }
+    $('galleryName').value = '';
+    $('galleryFile').value = '';
+    btn.textContent = '分享';
+    $('galleryGrid').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    alert('图片处理失败，请换一张试试。');
+    console.error('上传失败：', e);
+    btn.disabled = !$('galleryFile').files[0];
+    btn.textContent = '分享';
+    alert('上传失败，请检查网络后重试。');
   }
 }
 
@@ -1448,19 +1589,15 @@ function init() {
   $('locateBtn').addEventListener('click', locate);
   $('retryBtn').addEventListener('click', loadData);
 
-  // 照片投稿墙
-  renderGallery();
+  // 照片分享墙
+  loadGallery();
+  $('galleryGrid').addEventListener('contextmenu', e => e.preventDefault());
   $('galleryFile').addEventListener('change', e => {
     $('gallerySubmit').disabled = !e.target.files[0];
   });
   $('gallerySubmit').addEventListener('click', () => {
     const f = $('galleryFile').files[0];
     if (f) handleGalleryFile(f);
-  });
-  $('galleryClear').addEventListener('click', () => {
-    if (confirm('确定清空全部投稿照片吗？')) {
-      if (saveGallery([])) renderGallery();
-    }
   });
 
   document.querySelectorAll('.mode-btn').forEach(btn => {
